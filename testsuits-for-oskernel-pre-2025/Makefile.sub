@@ -1,0 +1,58 @@
+PREFIX ?= riscv64-linux-gnu-
+CC := $(PREFIX)gcc
+STRIP := $(PREFIX)strip
+DESTDIR ?= sdcard/riscv/glibc
+
+ifneq (,$(findstring riscv64,$(PREFIX)))
+    ARCH := riscv64
+else ifneq (,$(findstring loongarch64,$(PREFIX)))
+    ARCH := loongarch64
+else
+    $(error "Unknown ARCH! It should be riscv64 or loongarch64")
+endif
+
+all: basic busybox lua libc-test iozone
+	# mkdir -p $(DESTDIR)/lib/glibc
+	# cp -d /usr/riscv64-linux-gnu/lib/*.so* $(DESTDIR)/lib/glibc
+	# chmod +x $(DESTDIR)/*_testcode.sh
+
+basic: .PHONY
+	make -C basic/user all CHAPTER=7 ARCH=$(ARCH)
+	mkdir -p $(DESTDIR)/basic
+	cp -r basic/user/build/$(ARCH)/* $(DESTDIR)/basic/
+	cp scripts/basic/basic_testcode.sh $(DESTDIR)
+
+busybox: .PHONY
+	cp config/busybox-config-$(ARCH) busybox/.config
+	make -C busybox CC="$(CC) -static" STRIP=$(STRIP) -j
+	cp busybox/busybox $(DESTDIR)/
+	cp scripts/busybox/* $(DESTDIR)/
+
+lua: .PHONY
+	make -C lua CC="$(CC) -static" -j $(NPROC)
+	make -C lua install DESTIDR=$(DESTDIR)
+	cp lua/src/lua $(DESTDIR)/
+	cp scripts/lua/* $(DESTDIR)/
+
+libc-test: .PHONY
+	make -C libc-test disk PREFIX=$(PREFIX) -j 1
+	cp -r libc-test/disk/* $(DESTDIR)/
+	mkdir -p $(DESTDIR)/lib/
+	cp libc-test/src/functional/*.so libc-test/src/regression/*.so $(DESTDIR)/lib
+	rm $(DESTDIR)/run-all.sh
+	cp scripts/libctest/libctest_testcode.sh $(DESTDIR)
+
+iozone: .PHONY
+	make -C iozone linux CC="$(CC)" -j 
+	$(STRIP) iozone/iozone
+	cp iozone/iozone $(DESTDIR)/
+	cp scripts/iozone/* $(DESTDIR)/
+
+clean:
+	make -C basic/user clean
+	make -C busybox clean
+	make -C lua clean
+	make -C libc-test clean
+	make -C iozone clean
+
+.PHONY: 
