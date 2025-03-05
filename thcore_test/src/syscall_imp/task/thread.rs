@@ -1,9 +1,10 @@
 use core::ffi::{c_char, c_int};
 
+use alloc::string::String;
 use axerrno::LinuxError;
 use axtask::{TaskExtRef, current, yield_now};
 use num_enum::TryFromPrimitive;
-
+use axstd::println;
 use crate::{
     ctypes::{WaitFlags, WaitStatus},
     syscall_body,
@@ -126,13 +127,14 @@ pub(crate) fn sys_clone(
         };
 
         let curr_task = current();
-
+        
         if let Ok(new_task_id) = curr_task
             .task_ext()
             .clone_task(flags, stack, ptid, tls, ctid)
-        {
+        {   
+            info!("clone: new_task_id: {:?}", new_task_id);
             Ok(new_task_id as isize)
-        } else {
+        } else{
             Err(LinuxError::ENOMEM)
         }
     })
@@ -170,12 +172,13 @@ pub(crate) fn sys_wait4(pid: i32, exit_code_ptr: *mut i32, option: u32) -> isize
 pub fn sys_execve(path: *const c_char, argv: *const usize, envp: *const usize) -> isize {
     syscall_body!(sys_execve, {
         let path_str = arceos_posix_api::char_ptr_to_str(path)?;
-
+        // let dir = axfs::api::current_dir()?;
+        // let path_str = dir + path_str;
         info!("execve: {:?}", path_str);
-        if path_str.split('/').filter(|s| !s.is_empty()).count() > 1 {
-            info!("Multi-level directories are not supported");
-            return Err::<isize, _>(LinuxError::EINVAL);
-        }
+        // if path_str.split('/').filter(|s| !s.is_empty()).count() > 1 {
+        //     info!("Multi-level directories are not supported");
+        //     return Err::<isize, _>(LinuxError::EINVAL);
+        // }
 
         let argv_valid = unsafe { argv.is_null() || *argv == 0 };
         let envp_valid = unsafe { envp.is_null() || *envp == 0 };
@@ -188,9 +191,9 @@ pub fn sys_execve(path: *const c_char, argv: *const usize, envp: *const usize) -
             info!("envp is not supported");
         }
 
-        if let Err(e) = crate::task::exec(path_str) {
+        if let Err(e) = crate::task::exec(&path_str) {
             error!("Failed to exec: {:?}", e);
-            return Err(LinuxError::ENOSYS);
+            return Err::<isize, _>(LinuxError::ENOSYS);
         }
 
         unreachable!("execve should never return");

@@ -2,6 +2,7 @@ use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use arceos_posix_api::FD_TABLE;
 use axerrno::{AxError, AxResult};
 use axfs::{CURRENT_DIR, CURRENT_DIR_PATH};
+use axstd::println;
 use core::{
     alloc::Layout,
     cell::UnsafeCell,
@@ -76,6 +77,7 @@ impl TaskExt {
         _tls: usize,
         _ctid: usize,
     ) -> AxResult<u64> {
+        
         let _clone_flags = CloneFlags::from_bits((flags & !0x3f) as u32).unwrap();
 
         let mut new_task = TaskInner::new(
@@ -93,14 +95,14 @@ impl TaskExt {
             current().id_name(),
             axconfig::plat::KERNEL_STACK_SIZE,
         );
-
+        
         let current_task = current();
         let mut current_aspace = current_task.task_ext().aspace.lock();
         let new_aspace = current_aspace.clone_or_err()?;
         new_task
             .ctx_mut()
             .set_page_table_root(new_aspace.page_table_root());
-
+        
         let trap_frame = read_trapframe_from_kstack(current_task.get_kernel_stack_top().unwrap());
         let mut new_uctx = UspaceContext::from(&trap_frame);
         if let Some(stack) = stack {
@@ -116,6 +118,7 @@ impl TaskExt {
             Arc::new(Mutex::new(new_aspace)),
             0,
         );
+        
         new_task_ext.ns_init_new();
         new_task.init_task_ext(new_task_ext);
         let new_task_ref = axtask::spawn_task(new_task);
@@ -328,7 +331,8 @@ pub fn wait_pid(pid: i32, exit_code_ptr: *mut i32) -> Result<u64, WaitStatus> {
 
 pub fn exec(name: &str) -> AxResult<()> {
     let current_task = current();
-
+    info!("myexec: {}", name);
+    current_task.set_name(name);
     let program_name = name.to_string();
 
     let mut aspace = current_task.task_ext().aspace.lock();
@@ -336,28 +340,26 @@ pub fn exec(name: &str) -> AxResult<()> {
         warn!("Address space is shared by multiple tasks, exec is not supported.");
         return Err(AxError::Unsupported);
     }
-
+    
     aspace.unmap_user_areas()?;
     axhal::arch::flush_tlb(None);
-
     let args = vec![program_name];
-
     let (entry_point, user_stack_base) = crate::mm::load_user_app(&mut (args.into()), &mut aspace)
         .map_err(|_| {
             error!("Failed to load app {}", name);
             AxError::NotFound
         })?;
-    current_task.set_name(name);
-
+    // current_task.set_name(name);
+    drop(aspace);
     let task_ext = unsafe { &mut *(current_task.task_ext_ptr() as *mut TaskExt) };
     task_ext.uctx = UspaceContext::new(entry_point.as_usize(), user_stack_base, 0);
-
     unsafe {
         task_ext.uctx.enter_uspace(
             current_task
                 .kernel_stack_top()
                 .expect("No kernel stack top"),
         );
+        
     }
 }
 

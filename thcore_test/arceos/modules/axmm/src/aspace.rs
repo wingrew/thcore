@@ -243,18 +243,21 @@ impl AddrSpace {
     ) -> AxResult
     where
         F: FnMut(VirtAddr, usize, usize),
-    {
+    {   
+        info!("process_area_data_with_page_table: {:?}, {:?}, {:?}", start, size, va_range);
         if !va_range.contains_range(VirtAddrRange::from_start_size(start, size)) {
             return ax_err!(InvalidInput, "address out of range");
         }
         let mut cnt = 0;
         // If start is aligned to 4K, start_align_down will be equal to start_align_up.
         let end_align_up = (start + size).align_up_4k();
+        
         for vaddr in PageIter4K::new(start.align_down_4k(), end_align_up)
             .expect("Failed to create page iterator")
-        {
+        {   
+            // info!("in,{:?}", vaddr);
             let (mut paddr, _, _) = pt.query(vaddr).map_err(|_| AxError::BadAddress)?;
-
+            // info!("out");
             let mut copy_size = (size - cnt).min(PAGE_SIZE_4K);
 
             if copy_size == 0 {
@@ -265,9 +268,12 @@ impl AddrSpace {
                 copy_size = copy_size.min(PAGE_SIZE_4K - align_offset);
                 paddr += align_offset;
             }
+            // info!("process_area_data_with_page_table: {:?}, {:?}, {:?}", phys_to_virt(paddr), cnt, copy_size);
             f(phys_to_virt(paddr), cnt, copy_size);
+            // info!("process_area_data_with_page_table: out");
             cnt += copy_size;
         }
+        
         Ok(())
     }
 
@@ -372,10 +378,15 @@ impl AddrSpace {
                 .map(new_area, &mut new_pt, false)
                 .map_err(mapping_err_to_ax_err)?;
             // 将原区域的数据复制到新区域中。
-            buf.resize(buf.capacity().max(area.size()), 0);
+            // buf.resize(buf.capacity().max(area.size()), 0);
+            buf.resize(area.size(), 0);
+
+            // info!("clone_or_err: self.areas: {:?}, {:?}", area.start(), area.size());
+
             self.read(area.start(), &mut buf).inspect_err(|_| {
                 new_areas.clear(&mut new_pt).unwrap();
             })?;
+
             Self::process_area_data_with_page_table(
                 &new_pt,
                 &self.va_range,
@@ -390,6 +401,7 @@ impl AddrSpace {
                 },
             )?;
         }
+        // info!("clone_or_err: self.areas: out");
         Ok(Self {
             va_range: self.va_range,
             areas: new_areas,
